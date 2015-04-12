@@ -30,11 +30,11 @@ robot_collision_aff = robot_collision_aff.addToIgnoredListOfCollisionFilterGroup
 robot_collision_aff = robot_collision_aff.compile();
 
 
-l_foot = robot.findLinkInd('l_foot');
-r_foot = robot.findLinkInd('r_foot');
-l_hand = robot.findLinkInd('l_hand');
-r_hand = robot.findLinkInd('r_hand');
-head = robot.findLinkInd('head');
+l_foot = robot.findLinkId('l_foot');
+r_foot = robot.findLinkId('r_foot');
+l_hand = robot.findLinkId('l_hand');
+r_hand = robot.findLinkId('r_hand');
+head = robot.findLinkId('head');
 nLPts = length(robot.getBody(l_foot).getCollisionGeometry);
 l_foot_pts = zeros(3,nLPts);
 for i=1:nLPts,
@@ -190,13 +190,15 @@ valuecheck(c,[0;sum(kc.isTimeValid(t3))]);
 testKinCnst_userfun(false,false,t3,q31,q31_aff,RigidBodyConstraint.WorldFixedBodyPoseConstraintType,robot,robot_aff,l_hand,tspan2);
 
 
-display('Check all-to-all closest-distance constraint');
-testKinCnst_userfun(true,true,t_valid,q,q_aff,RigidBodyConstraint.AllBodiesClosestDistanceConstraintType,robot_collision,robot_collision_aff,0.05,1e1,struct(),tspan0);
-testKinCnstInvalidTime_userfun(true,true,t_invalid,q,RigidBodyConstraint.AllBodiesClosestDistanceConstraintType,robot_collision,0.05,1e1,struct(),tspan0);
+if checkDependency('bullet')
+  display('Check all-to-all closest-distance constraint');
+  testKinCnst_userfun(true,true,t_valid,q,q_aff,RigidBodyConstraint.AllBodiesClosestDistanceConstraintType,robot_collision,robot_collision_aff,0.05,1e1,struct(),tspan0);
+  testKinCnstInvalidTime_userfun(true,true,t_invalid,q,RigidBodyConstraint.AllBodiesClosestDistanceConstraintType,robot_collision,0.05,1e1,struct(),tspan0);
 
-display('Check minimum distance constraint');
-testKinCnst_userfun(true,true,t_valid,q,q_aff,RigidBodyConstraint.MinDistanceConstraintType,robot_collision,robot_collision_aff,0.05,[],tspan0);
-testKinCnstInvalidTime_userfun(true,true,t_invalid,q,RigidBodyConstraint.MinDistanceConstraintType,robot_collision,0.05,[],tspan0);
+  display('Check minimum distance constraint');
+  testKinCnst_userfun(true,true,t_valid,q,q_aff,RigidBodyConstraint.MinDistanceConstraintType,robot_collision,robot_collision_aff,0.05,[],tspan0);
+  testKinCnstInvalidTime_userfun(true,true,t_invalid,q,RigidBodyConstraint.MinDistanceConstraintType,robot_collision,0.05,[],tspan0);
+end
 
 display('Check point to point distance constraint');
 lhand_pts = rand(3,2);
@@ -243,6 +245,10 @@ testKinCnst_userfun(true,false,t_valid,q,q_aff,RigidBodyConstraint.RelativeQuatC
   r_hand,l_hand,rpy2quat(randn(3,1)),5/180*pi,tspan0);
 testKinCnstInvalidTime_userfun(true,false,t_invalid,q,RigidBodyConstraint.RelativeQuatConstraintType,robot,...
   r_hand,l_hand,rpy2quat(randn(3,1)),5/180*pi,tspan0);
+
+display('Check gravity compenstaion torque constraint');
+testKinCnst_userfun(true,false,t_valid,q,q_aff,RigidBodyConstraint.GravityCompensationTorqueConstraintType,robot,robot_aff,robot.findPositionIndices('elx'),[-50;-70],[60;90],tspan0);
+testKinCnstInvalidTime_userfun(true,false,t_invalid,q,RigidBodyConstraint.GravityCompensationTorqueConstraintType,robot,robot.findPositionIndices('elx'),[-50;-70],[60;90],tspan0);
 end
 
 function testKinCnst_userfun(singleTimeFlag,always_use_mex_dynamics,t,q,q_aff,cnst_type,robot,robot_aff,varargin)

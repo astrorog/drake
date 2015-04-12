@@ -16,45 +16,42 @@ if (LCM_FOUND)
 endif()
 
 if (eigen3_FOUND)
-  add_mex(drakeUtil SHARED drakeUtil.cpp)
+  add_mex(drakeUtil SHARED drakeUtil.cpp MexWrapper.cpp)
 
   # todo: use this again once I can assume everyone has CMAKE version >= 2.8.8
   #add_mex(drakeUtil OBJECT drakeUtil.cpp)
 
+  pods_install_headers(drakeUtil.h MexWrapper.h DESTINATION drake)
   pods_install_libraries(drakeUtil)
-
-  if (NOT WIN32) # todo: fix this
+  pods_install_pkg_config_file(drake-util
+    LIBS -ldrakeUtil
+    REQUIRES
+    VERSION 0.0.1)
 
   add_library(drakeGradientUtil SHARED drakeGradientUtil.cpp)
   pods_install_libraries(drakeGradientUtil)
   pods_install_headers(drakeGradientUtil.h DESTINATION drake)
 
-  endif(NOT WIN32)
-
   add_library(drakeGeometryUtil SHARED drakeGeometryUtil.cpp)
-  if (NOT WIN32)
   target_link_libraries(drakeGeometryUtil drakeGradientUtil)
-  endif()
   pods_install_libraries(drakeGeometryUtil)
   pods_install_headers(drakeGeometryUtil.h DESTINATION drake)
 
-  if (NOT WIN32)
-  add_mex(test/testQuatmex test/testQuatmex.cpp)
-  target_link_libraries(test/testQuatmex drakeGeometryUtil)
+  pods_install_headers(drakeFloatingPointUtil.h DESTINATION drake)
+  
+  pods_install_headers(GradientVar.h DESTINATION drake)
 
-  add_mex(test/testGeometryGradientsmex test/testGeometryGradientsmex.cpp)
-  target_link_libraries(test/testGeometryGradientsmex drakeGeometryUtil)
-
-  add_mex(test/testGeometryConversionFunctionsmex test/testGeometryConversionFunctionsmex.cpp)
-  target_link_libraries(test/testGeometryConversionFunctionsmex drakeGeometryUtil)
-  endif()
+  add_mex(cylindrical2cartesianmex cylindrical2cartesianmex.cpp)
+  target_link_libraries(cylindrical2cartesianmex drakeGeometryUtil drakeGradientUtil)
+  add_mex(cartesian2cylindricalmex cartesian2cylindricalmex.cpp)
+  target_link_libraries(cartesian2cylindricalmex drakeGeometryUtil drakeGradientUtil)
 endif()
 
 add_subdirectory(test)
 
 
 # Mex debugging tools:
-if (NOT WIN32)
+if (0) #NOT WIN32)
 add_mex(debugMex SHARED debugMexLib.cpp)
 target_link_libraries(debugMex -ldl)
 #set_property( SOURCE debugMexLib.cpp PROPERTY COMPILE_FLAGS -DMX_COMPAT_32 )

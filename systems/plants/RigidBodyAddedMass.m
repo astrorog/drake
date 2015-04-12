@@ -68,12 +68,9 @@ classdef RigidBodyAddedMass < RigidBodyForceElement
     end
     
     methods (Static)
-        function [model,obj] = parseURDFNode(model,robotnum,node,options)
-            name = char(node.getAttribute('name'));
-            name = regexprep(name, '\.', '_', 'preservecase');
-            
+        function [model,obj] = parseURDFNode(model,name,robotnum,node,options)
             elNode = node.getElementsByTagName('parent').item(0);
-            parent = findLinkInd(model,char(elNode.getAttribute('link')),robotnum);
+            parent = findLinkId(model,char(elNode.getAttribute('link')),robotnum);
             
             xyz=zeros(3,1); rpy=zeros(3,1);
             elnode = node.getElementsByTagName('origin').item(0);

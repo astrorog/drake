@@ -23,8 +23,8 @@ void mexFunction( int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[] ) {
   // first get the model_ptr back from matlab
   RigidBodyManipulator *model= (RigidBodyManipulator*) getDrakeMexPointer(prhs[0]);
 
-  double* q = mxGetPr(prhs[1]);
-  for (int i = 0; i < model->num_dof; i++) {
+  double* q = mxGetPrSafe(prhs[1]);
+  for (int i = 0; i < model->num_positions; i++) {
     if (q[i] - model->cached_q[i] > 1e-8 || q[i] - model->cached_q[i] < -1e-8) {
       mexErrMsgIdAndTxt("Drake:bodyKinmex:InvalidKinematics","This kinsol is no longer valid.  Somebody has called doKinematics with a different q since the solution was computed.");
     }
@@ -36,28 +36,28 @@ void mexFunction( int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[] ) {
       mexErrMsgIdAndTxt("Drake:forwardKinmex:BadInputs","body_ind must be -1 (for com) or between -num_frames-1 and num_bodies-1");
   }
 
-  int n_pts = mxGetN(prhs[3]);
-  int dim = mxGetM(prhs[3]);
+  int n_pts = static_cast<int>(mxGetN(prhs[3]));
+  int dim = static_cast<int>(mxGetM(prhs[3]));
   
   if (dim != 3)
     mexErrMsgIdAndTxt("Drake:bodyKinmex:BadInputs", "number of rows in pts must be 3");
   
-  Map<MatrixXd> pts_tmp(mxGetPr(prhs[3]),dim,n_pts);
+  Map<MatrixXd> pts_tmp(mxGetPrSafe(prhs[3]),dim,n_pts);
   MatrixXd pts(dim+1,n_pts);
   pts << pts_tmp, MatrixXd::Ones(1,n_pts);
   
   plhs[0] = mxCreateDoubleMatrix(dim,n_pts,mxREAL);
-  Map<MatrixXd> x(mxGetPr(plhs[0]),dim,n_pts);
+  Map<MatrixXd> x(mxGetPrSafe(plhs[0]),dim,n_pts);
 
   Map<MatrixXd> *J=NULL, *P=NULL;
 
   if (nlhs>1) {
-    plhs[1] = mxCreateDoubleMatrix(dim*n_pts,model->num_dof,mxREAL);
-    J = new Map<MatrixXd>(mxGetPr(plhs[1]),dim*n_pts,model->num_dof);
+    plhs[1] = mxCreateDoubleMatrix(dim*n_pts,model->num_positions,mxREAL);
+    J = new Map<MatrixXd>(mxGetPrSafe(plhs[1]),dim*n_pts,model->num_positions);
   }
   if (nlhs>2) {
     plhs[2] = mxCreateDoubleMatrix(dim*n_pts,dim*n_pts,mxREAL);
-    P = new Map<MatrixXd>(mxGetPr(plhs[2]),dim*n_pts,dim*n_pts);
+    P = new Map<MatrixXd>(mxGetPrSafe(plhs[2]),dim*n_pts,dim*n_pts);
   }
 
   model->bodyKin(body_ind,pts,x,J,P);

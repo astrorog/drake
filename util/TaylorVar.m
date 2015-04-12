@@ -228,6 +228,9 @@ classdef TaylorVar
           a=TaylorVar(reshape(f,a.dim),{dcdx});
         end
       else
+        if (isscalar(a) && ~isscalar(b)) a=repmat(a,size(b)); end
+        if (isscalar(b) && ~isscalar(a)) b=repmat(b,size(a)); end
+        
         b=b(:);
         a.f=a.f.*b;
         for o=1:length(a.df)
@@ -586,7 +589,7 @@ classdef TaylorVar
       function cleanup_subs
         % turn all subsrefs into A(ind)=B(:), instead of A(sub1,sub2)=B.
         for k=1:length(s.subs)
-          if (s.subs{k}==':')
+          if (strcmp(s.subs{k},':'))
             s.subs{k}=1:a.dim(k);
           end
         end
@@ -847,7 +850,7 @@ classdef TaylorVar
       
       d = prod(dd);
       if d>1 % ... replicate xs and index in case PP is vector-valued ...
-        xs = reshape(xs(ones(d,1),:),1,d*lx);
+        xs = reshape(repmat(xs,d,1),1,d*lx);
         index = d*index; temp = (-d:-1).';
         index = reshape(1+index(ones(d,1),:)+temp(:,ones(1,lx)), d*lx, 1 );
       else

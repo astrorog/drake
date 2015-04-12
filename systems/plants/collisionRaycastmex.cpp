@@ -41,16 +41,16 @@ void mexFunction( int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[] ) {
   }
   
   
-  memcpy(origins.data(), mxGetPr(prhs[1]), sizeof(double)*mxGetNumberOfElements(prhs[1]));
-  memcpy(ray_endpoints.data(), mxGetPr(prhs[2]), sizeof(double)*mxGetNumberOfElements(prhs[2]));
-  bool use_margins = (bool) mxGetScalar(prhs[3]);
+  memcpy(origins.data(), mxGetPrSafe(prhs[1]), sizeof(double)*mxGetNumberOfElements(prhs[1]));
+  memcpy(ray_endpoints.data(), mxGetPrSafe(prhs[2]), sizeof(double)*mxGetNumberOfElements(prhs[2]));
+  bool use_margins = (mxGetScalar(prhs[3])!=0.0);
   VectorXd distances;
   
   model->collisionRaycast(origins, ray_endpoints, distances, use_margins);
   
   if (nlhs>0) {
-    plhs[0] = mxCreateDoubleMatrix(distances.size(),1,mxREAL);
-    memcpy(mxGetPr(plhs[0]), distances.data(), sizeof(double)*distances.size());
+    plhs[0] = mxCreateDoubleMatrix(static_cast<int>(distances.size()),1,mxREAL);
+    memcpy(mxGetPrSafe(plhs[0]), distances.data(), sizeof(double)*distances.size());
   }
   
 }
