@@ -2,6 +2,10 @@
 #include "drakeUtil.h"
 #include "mex.h"
 
+#ifdef USE_MAPS
+#include "terrain-map/TerrainMap.hpp"
+#endif
+
 template <typename DerivedA, typename DerivedB>
 void getRows(std::set<int> &rows, MatrixBase<DerivedA> const &M, MatrixBase<DerivedB> &Msub)
 {
@@ -62,8 +66,9 @@ mxArray* myGetField(const mxArray* pobj, const char* propname)
   return pm;
 }
 
-bool inSupport(std::vector<SupportStateElement> &supports, int body_idx) {
-  for (int i=0; i<supports.size(); i++) {
+bool inSupport(std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>> &supports, int body_idx) {
+  // HANDLE IF BODY_IDX IS A FRAME ID?
+  for (size_t i=0; i<supports.size(); i++) {
     if (supports[i].body_idx == body_idx)
       return true;
   }
@@ -85,6 +90,8 @@ void collisionDetect(void* map_ptr, Vector3d const &contact_pos, Vector3d &pos, 
         return;
       }
     }
+#else
+    throw std::runtime_error("map_ptr is not NULL, but controlUtil was built without USE_MAPS support");
 #endif      
   } else {
 //    mexPrintf("Warning: using 0,0,1 as normal\n");
@@ -122,15 +129,14 @@ int contactPhi(RigidBodyManipulator* r, SupportStateElement& supp, void *map_ptr
 
   if (nc<1) return nc;
 
-  Vector3d contact_pos,pos,posB,normal;
+  Vector3d contact_pos,pos,normal;
 
   int i=0;
   for (std::vector<Vector4d,aligned_allocator<Vector4d>>::iterator pt_iter=supp.contact_pts.begin(); pt_iter!=supp.contact_pts.end(); pt_iter++) {
-    
     r->forwardKin(supp.body_idx,*pt_iter,0,contact_pos);
-    collisionDetect(map_ptr,contact_pos,pos,NULL,terrain_height);
+    collisionDetect(map_ptr,contact_pos,pos,&normal,terrain_height);
     pos -= contact_pos;  // now -rel_pos in matlab version
-    
+//    std::cout << "contact pos: " << contact_pos.transpose() << std::endl;
     phi(i) = pos.norm();
     if (pos.dot(normal)>0)
       phi(i)=-phi(i);
@@ -139,7 +145,7 @@ int contactPhi(RigidBodyManipulator* r, SupportStateElement& supp, void *map_ptr
   return nc;
 }
 
-int contactConstraints(RigidBodyManipulator *r, int nc, std::vector<SupportStateElement>& supp, void *map_ptr, MatrixXd &n, MatrixXd &D, MatrixXd &Jp, MatrixXd &Jpdot,double terrain_height)
+int contactConstraints(RigidBodyManipulator *r, int nc, std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>>& supp, void *map_ptr, MatrixXd &n, MatrixXd &D, MatrixXd &Jp, MatrixXd &Jpdot,double terrain_height)
 {
   int j, k=0, nq = r->num_positions;
 
@@ -148,11 +154,11 @@ int contactConstraints(RigidBodyManipulator *r, int nc, std::vector<SupportState
   Jp.resize(3*nc,nq);
   Jpdot.resize(3*nc,nq);
   
-  Vector3d contact_pos,pos,posB,normal;
+  Vector3d contact_pos,pos,normal;
   MatrixXd J(3,nq);
   Matrix<double,3,m_surface_tangents> d;
   
-  for (std::vector<SupportStateElement>::iterator iter = supp.begin(); iter!=supp.end(); iter++) {
+  for (std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>>::iterator iter = supp.begin(); iter!=supp.end(); iter++) {
     if (nc>0) {
       for (std::vector<Vector4d,aligned_allocator<Vector4d>>::iterator pt_iter=iter->contact_pts.begin(); pt_iter!=iter->contact_pts.end(); pt_iter++) {
         r->forwardKin(iter->body_idx,*pt_iter,0,contact_pos);
@@ -182,7 +188,7 @@ int contactConstraints(RigidBodyManipulator *r, int nc, std::vector<SupportState
 }
 
 
-int contactConstraintsBV(RigidBodyManipulator *r, int nc, double mu, std::vector<SupportStateElement>& supp, void *map_ptr, MatrixXd &B, MatrixXd &JB, MatrixXd &Jp, VectorXd &Jpdotv, MatrixXd &normals, double terrain_height)
+int contactConstraintsBV(RigidBodyManipulator *r, int nc, double mu, std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>>& supp, void *map_ptr, MatrixXd &B, MatrixXd &JB, MatrixXd &Jp, VectorXd &Jpdotv, MatrixXd &normals, double terrain_height)
 {
   int j, k=0, nq = r->num_positions;
 
@@ -192,18 +198,23 @@ int contactConstraintsBV(RigidBodyManipulator *r, int nc, double mu, std::vector
   Jpdotv.resize(3*nc);
   normals.resize(3, nc);
   
-  Vector3d contact_pos,pos,posB,normal; 
+  Vector3d contact_pos,pos,normal; 
   MatrixXd J(3,nq);
   Matrix<double,3,m_surface_tangents> d;
   double norm = sqrt(1+mu*mu); // because normals and ds are orthogonal, the norm has a simple form
   
-  for (std::vector<SupportStateElement>::iterator iter = supp.begin(); iter!=supp.end(); iter++) {
+  for (std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>>::iterator iter = supp.begin(); iter!=supp.end(); iter++) {
     if (nc>0) {
       for (std::vector<Vector4d,aligned_allocator<Vector4d>>::iterator pt_iter=iter->contact_pts.begin(); pt_iter!=iter->contact_pts.end(); pt_iter++) {
         r->forwardKin(iter->body_idx,*pt_iter,0,contact_pos);
         r->forwardJac(iter->body_idx,*pt_iter,0,J);
 
-        collisionDetect(map_ptr,contact_pos,pos,&normal,terrain_height);
+        if (iter->use_support_surface) {
+          normal = iter->support_surface.head(3);
+        }
+        else {
+          collisionDetect(map_ptr,contact_pos,pos,&normal,terrain_height);
+        }
         surfaceTangents(normal,d);
         for (j=0; j<m_surface_tangents; j++) {
           B.col(2*k*m_surface_tangents+j) = (normal + mu*d.col(j)) / norm; 
@@ -229,7 +240,7 @@ int contactConstraintsBV(RigidBodyManipulator *r, int nc, double mu, std::vector
   return k;
 }
 
-MatrixXd individualSupportCOPs(RigidBodyManipulator* r, const std::vector<SupportStateElement>& active_supports,
+MatrixXd individualSupportCOPs(RigidBodyManipulator* r, const std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>>& active_supports,
     const MatrixXd& normals, const MatrixXd& B, const VectorXd& beta)
 {
   const int n_basis_vectors_per_contact = static_cast<int>(B.cols() / normals.cols());
@@ -241,7 +252,7 @@ MatrixXd individualSupportCOPs(RigidBodyManipulator* r, const std::vector<Suppor
   MatrixXd individual_cops(3, n);
   individual_cops.fill(std::numeric_limits<double>::quiet_NaN());
 
-  for (int j = 0; j < active_supports.size(); j++) {
+  for (size_t j = 0; j < active_supports.size(); j++) {
     auto active_support = active_supports[j];
     auto contact_pts = active_support.contact_pts;
 
@@ -259,7 +270,7 @@ MatrixXd individualSupportCOPs(RigidBodyManipulator* r, const std::vector<Suppor
       Vector3d force = Vector3d::Zero();
       Vector3d torque = Vector3d::Zero();
 
-      for (int k = 0; k < contact_pts.size(); k++) {
+      for (size_t k = 0; k < contact_pts.size(); k++) {
       // for (auto k = contact_pts.begin(); k!= contact_pts.end(); k++) { 
         const auto& Bblock = Bj.middleCols(k * n_basis_vectors_per_contact, n_basis_vectors_per_contact);
         const auto& betablock = betaj.segment(k * n_basis_vectors_per_contact, n_basis_vectors_per_contact);
@@ -285,7 +296,7 @@ MatrixXd individualSupportCOPs(RigidBodyManipulator* r, const std::vector<Suppor
   return individual_cops;
 }
 
-std::vector<SupportStateElement> parseSupportData(const mxArray* supp_data) {
+std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>> parseSupportData(const mxArray* supp_data) {
   double *logic_map_double;
   int nsupp = mxGetN(supp_data);
   if (mxGetM(supp_data) != 1) {
@@ -296,7 +307,7 @@ std::vector<SupportStateElement> parseSupportData(const mxArray* supp_data) {
   Vector4d contact_pt = Vector4d::Zero();
   contact_pt(3) = 1.0;
   int num_pts;
-  std::vector<SupportStateElement> supports;
+  std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>> supports;
   const mxArray* pm;
 
   for (i = 0; i < nsupp; i++) {
@@ -308,6 +319,7 @@ std::vector<SupportStateElement> parseSupportData(const mxArray* supp_data) {
     pm = mxGetField(supp_data, i, "support_logic_map");
     if (mxIsDouble(pm)) {
       logic_map_double = mxGetPrSafe(pm);
+      assert(mxGetM(pm)==4);
       for (j = 0; j < 4; j++) {
         se.support_logic_map[j] = logic_map_double[j] != 0;
       }
@@ -322,7 +334,6 @@ std::vector<SupportStateElement> parseSupportData(const mxArray* supp_data) {
       contact_pt.head(3) = contact_pts.col(j);
       se.contact_pts.push_back(contact_pt);
     }
-    se.contact_surface = ((int) mxGetScalar(mxGetField(supp_data, i, "contact_surfaces"))) - 1;
     supports.push_back(se);
   }
   return supports;
@@ -330,7 +341,7 @@ std::vector<SupportStateElement> parseSupportData(const mxArray* supp_data) {
 
 bool isSupportElementActive(SupportStateElement* se, bool contact_force_detected, bool kinematic_contact_detected) {
   bool is_active;
-
+//  std::cout << "checking element with body: " << se->body_idx << " force: " << contact_force_detected << " kin: " << kinematic_contact_detected << std::endl;
   // Implement the logic described in QPInputConstantHeight.m
   if (!contact_force_detected && !kinematic_contact_detected) {
     is_active = se->support_logic_map[0]; 
@@ -344,7 +355,7 @@ bool isSupportElementActive(SupportStateElement* se, bool contact_force_detected
   return is_active;
 }
 
-Matrix<bool, Dynamic, 1> getActiveSupportMask(RigidBodyManipulator* r, void* map_ptr, VectorXd q, VectorXd qd, std::vector<SupportStateElement> &available_supports, const Ref<const Matrix<bool, Dynamic, 1>> &contact_force_detected, double contact_threshold, double terrain_height) {
+Matrix<bool, Dynamic, 1> getActiveSupportMask(RigidBodyManipulator* r, void* map_ptr, VectorXd q, VectorXd qd, std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>> &available_supports, const Ref<const Matrix<bool, Dynamic, 1>> &contact_force_detected, double contact_threshold, double terrain_height) {
   r->doKinematics(q, false, qd);
 
   int nsupp = available_supports.size();
@@ -385,13 +396,13 @@ Matrix<bool, Dynamic, 1> getActiveSupportMask(RigidBodyManipulator* r, void* map
   return active_supp_mask;
 }
 
-std::vector<SupportStateElement> getActiveSupports(RigidBodyManipulator* r, void* map_ptr, VectorXd q, VectorXd qd, std::vector<SupportStateElement> &available_supports, const Ref<const Matrix<bool, Dynamic, 1>> &contact_force_detected, double contact_threshold, double terrain_height) {
+std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>> getActiveSupports(RigidBodyManipulator* r, void* map_ptr, VectorXd q, VectorXd qd, std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>> &available_supports, const Ref<const Matrix<bool, Dynamic, 1>> &contact_force_detected, double contact_threshold, double terrain_height) {
 
   Matrix<bool, Dynamic, 1> active_supp_mask = getActiveSupportMask(r, map_ptr, q, qd, available_supports, contact_force_detected, contact_threshold, terrain_height);
 
-  std::vector<SupportStateElement> active_supports;
+  std::vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>> active_supports;
 
-  for (int i=0; i < available_supports.size(); i++) {
+  for (size_t i=0; i < available_supports.size(); i++) {
     if (active_supp_mask(i)) {
       active_supports.push_back(available_supports[i]);
     }
@@ -399,36 +410,105 @@ std::vector<SupportStateElement> getActiveSupports(RigidBodyManipulator* r, void
   return active_supports;
 }
 
-Vector6d bodyMotionPD(RigidBodyManipulator *r, DrakeRobotState &robot_state, const int body_index, const Ref<const Vector6d> &body_pose_des, const Ref<const Vector6d> &body_v_des, const Ref<const Vector6d> &body_vdot_des, const Ref<const Vector6d> &Kp, const Ref<const Vector6d> &Kd) {
+Vector6d bodySpatialMotionPD(RigidBodyManipulator *r, DrakeRobotState &robot_state, const int body_index, const Isometry3d &body_pose_des, const Ref<const Vector6d> &body_v_des, const Ref<const Vector6d> &body_vdot_des, const Ref<const Vector6d> &Kp, const Ref<const Vector6d> &Kd, const Isometry3d &T_task_to_world)
+{
+  // @param body_pose_des  desired pose in the task frame, this is the homogeneous transformation from desired body frame to task frame 
+  // @param body_v_des    desired [xyzdot;angular_velocity] in task frame
+  // @param body_vdot_des    desired [xyzddot;angular_acceleration] in task frame
+  // @param Kp     The gain in task frame
+  // @param Kd     The gain in task frame 
+  // @param T_task_to_world  The homogeneous transform from task to world
+  // @retval twist_dot, [angular_acceleration, xyz_acceleration] in body frame
 
-  r->doKinematics(robot_state.q,false,robot_state.qd);
+  if(!r->getUseNewKinsol())
+  {
+    throw std::runtime_error("bodySpatialMotionPD requires new kinsol format");
+  }
+  Isometry3d T_world_to_task = T_task_to_world.inverse();
+  r->doKinematicsNew(robot_state.q,robot_state.qd,false);
 
-  // TODO: this must be updated to use quaternions/spatial velocity
-  Vector6d body_pose;
-  MatrixXd J = MatrixXd::Zero(6,r->num_positions);
-  Vector4d zero = Vector4d::Zero();
-  zero(3) = 1.0;
-  r->forwardKin(body_index,zero,1,body_pose);
-  r->forwardJac(body_index,zero,1,J);
+  Vector3d origin = Vector3d::Zero();
+  auto body_pose = r->forwardKinNew(origin,body_index,0,2,0);
+  Vector3d body_xyz = body_pose.value().head<3>();
+  Vector3d body_xyz_task = T_world_to_task * body_xyz.colwise().homogeneous();
+  Vector4d body_quat = body_pose.value().tail<4>();
+  std::vector<int> v_indices;
+  auto J_geometric = r->geometricJacobian<double>(0,body_index,body_index,0,true,&v_indices);
+  VectorXd v_compact(v_indices.size());
+  for(size_t i = 0;i<v_indices.size();i++)
+  {
+    v_compact(i) = robot_state.qd(v_indices[i]);
+  }
+  Vector6d body_twist = J_geometric.value() * v_compact;
+  Matrix3d R_body_to_world = quat2rotmat(body_quat);
+  Matrix3d R_world_to_body = R_body_to_world.transpose();
+  Matrix3d R_body_to_task = T_world_to_task.linear() * R_body_to_world;
+  Vector3d body_angular_vel = R_body_to_world * body_twist.head<3>();// body_angular velocity in world frame
+  Vector3d body_xyzdot = R_body_to_world * body_twist.tail<3>();// body_xyzdot in world frame
+  Vector3d body_angular_vel_task = T_world_to_task.linear() * body_angular_vel;
+  Vector3d body_xyzdot_task = T_world_to_task.linear() * body_xyzdot;
 
-  Vector6d body_error;
-  body_error.head<3>()= body_pose_des.head<3>()-body_pose.head<3>();
+  Vector3d body_xyz_des = body_pose_des.translation();
+  Vector3d body_angular_vel_des = body_v_des.tail<3>();
+  Vector3d body_angular_vel_dot_des = body_vdot_des.tail<3>();
 
-  Vector3d error_rpy,pose_rpy,des_rpy;
-  pose_rpy = body_pose.tail<3>();
-  des_rpy = body_pose_des.tail<3>();
-  angleDiff(pose_rpy,des_rpy,error_rpy);
-  body_error.tail(3) = error_rpy;
+  Vector3d xyz_err_task = body_xyz_des-body_xyz_task;
 
-  Vector6d body_vdot = (Kp.array()*body_error.array()).matrix() + (Kd.array()*(body_v_des-J*robot_state.qd).array()).matrix() + body_vdot_des;
-  return body_vdot;
+  Matrix3d R_des = body_pose_des.linear();
+  Matrix3d R_err_task = R_des * R_body_to_task.transpose();
+  Vector4d angleAxis_err_task = rotmat2axis(R_err_task); 
+  Vector3d angular_err_task = angleAxis_err_task.head<3>() * angleAxis_err_task(3);
+
+  Vector3d xyzdot_err_task = body_v_des.head<3>() - body_xyzdot_task;
+  Vector3d angular_vel_err_task = body_angular_vel_des - body_angular_vel_task;
+
+  Vector3d Kp_xyz = Kp.head<3>();
+  Vector3d Kd_xyz = Kd.head<3>();
+  Vector3d Kp_angular = Kp.tail<3>();
+  Vector3d Kd_angular = Kd.tail<3>();
+  Vector3d body_xyzddot_task = (Kp_xyz.array() * xyz_err_task.array()).matrix() + (Kd_xyz.array() * xyzdot_err_task.array()).matrix() + body_vdot_des.head<3>();
+  Vector3d body_angular_vel_dot_task = (Kp_angular.array() * angular_err_task.array()).matrix() + (Kd_angular.array() * angular_vel_err_task.array()).matrix() + body_angular_vel_dot_des;
+  
+  Vector6d twist_dot = Vector6d::Zero();
+  Vector3d body_xyzddot = T_task_to_world.linear() * body_xyzddot_task;
+  Vector3d body_angular_vel_dot = T_task_to_world.linear() * body_angular_vel_dot_task;
+  twist_dot.head<3>() = R_world_to_body * body_angular_vel_dot;
+  twist_dot.tail<3>() = R_world_to_body * body_xyzddot - body_twist.head<3>().cross(body_twist.tail<3>());
+  return twist_dot;
 }
 
 void evaluateCubicSplineSegment(double t, const Ref<const Matrix<double, 6, 4>> &coefs, Vector6d &y, Vector6d &ydot, Vector6d &yddot) {
   // evaluate a cubic spline with coefficients coef and starting time 0 at time t
-  y = coefs.col(0)*pow(t, 3) + coefs.col(1)*pow(t, 2) + coefs.col(2)*t + coefs.col(3);
-  ydot = 3*coefs.col(0)*pow(t,2) + 2*coefs.col(1)*t + coefs.col(2);
+  y = coefs.col(0) * pow(t, 3) + coefs.col(1) * pow(t, 2) + coefs.col(2) * t + coefs.col(3);
+  ydot = 3*coefs.col(0) * pow(t,2) + 2*coefs.col(1)*t + coefs.col(2);
   yddot = 6*coefs.col(0)*t + 2*coefs.col(1);
+}
+
+void evaluateXYZExpmapCubicSplineSegment(double t, const Matrix<double,6,4> &coefs, Isometry3d &body_pose_des, Vector6d &xyzdot_angular_vel, Vector6d &xyzddot_angular_accel)
+{
+  double t2 = t*t;
+  double t3 = pow(t,3);
+  Vector6d xyzexp = coefs.col(0)*t3 + coefs.col(1)*t2 + coefs.col(2)*t + coefs.col(3);
+  Vector6d xyzexpdot = coefs.col(0)*3.0*t2 + coefs.col(1)*2.0*t + coefs.col(2);
+  Vector6d xyzexpddot = coefs.col(0)*6.0*t + coefs.col(1)*2.0;
+  xyzdot_angular_vel.head<3>() = xyzexpdot.head<3>();
+  xyzddot_angular_accel.head<3>() = xyzexpddot.head<3>();
+  Vector3d expmap = xyzexp.tail<3>();
+  auto quat_grad = expmap2quat(expmap,2);
+  Vector4d quat = quat_grad.value();
+  body_pose_des.linear() = quat2rotmat(quat);
+  body_pose_des.translation() = xyzexp.head<3>();
+  Vector4d quat_dot = quat_grad.gradient().value() * xyzexpdot.tail<3>();
+  quat_grad.gradient().gradient().value().resize(12,3);
+  Matrix<double,12,3> dE = quat_grad.gradient().gradient().value();
+  Vector3d expdot = xyzexpdot.tail<3>();
+  Matrix<double,4,3> Edot = matGradMult(dE,expdot);
+  Vector4d quat_ddot = quat_grad.gradient().value()*xyzexpddot.tail<3>() + Edot*expdot;
+  Matrix<double,3,4> M;
+  Matrix<double,12,4> dM;
+  quatdot2angularvelMatrix(quat,M,&dM);
+  xyzdot_angular_vel.tail<3>() = M*quat_dot;
+  xyzddot_angular_accel.tail<3>() = M*quat_ddot + matGradMult(dM,quat_dot)*quat_dot;
 }
 
 // convert Matlab cell array of strings into a C++ vector of strings

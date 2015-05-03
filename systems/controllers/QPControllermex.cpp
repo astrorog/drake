@@ -157,9 +157,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     pdata->Hqp.resize(nq,nq);
     pdata->fqp.resize(nq);
     pdata->Ag.resize(6,nq);
-    pdata->Agdot.resize(6,nq);
     pdata->Ak.resize(3,nq);
-    pdata->Akdot.resize(3,nq);
 
     pdata->vbasis_len = 0;
     pdata->cbasis_len = 0;
@@ -188,8 +186,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
   
   Map< VectorXd > qddot_des(mxGetPrSafe(prhs[narg++]),nq);
   
-  Map<VectorXd> q(mxGetPrSafe(prhs[narg++]), nq);
-  Map<VectorXd> qd(&q[nq], nv);  
+  Map<VectorXd> q(mxGetPrSafe(prhs[narg]), nq);
+  Map<VectorXd> qd(mxGetPrSafe(prhs[narg++]) + nq, nv);
 
   vector<VectorXd,aligned_allocator<VectorXd>> body_accel_inputs;
   for (int i=0; i<pdata->n_body_accel_inputs; i++) {
@@ -245,7 +243,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
   Vector4d contact_pt = Vector4d::Zero();
   contact_pt(3) = 1.0;
 
-  vector<SupportStateElement> active_supports;
+  vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>> active_supports;
   set<int> contact_bodies; // redundant, clean up later
   int num_active_contact_pts=0;
   if (!mxIsEmpty(prhs[desired_support_argid])) {
@@ -255,9 +253,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     double* pBodies = mxGetPrSafe(mxBodies);
     mxArray* mxContactPts = myGetField(prhs[desired_support_argid],"contact_pts");
     if (!mxContactPts) mexErrMsgTxt("couldn't get contact points");
-    mxArray* mxContactSurfaces = myGetField(prhs[desired_support_argid],"contact_surfaces");
-    if (!mxContactSurfaces) mexErrMsgTxt("couldn't get contact surfaces");
-    double* pContactSurfaces = mxGetPrSafe(mxContactSurfaces);
     
     for (i=0; i<mxGetNumberOfElements(mxBodies);i++) {
       mxArray* mxBodyContactPts = mxGetCell(mxContactPts,i);
@@ -275,7 +270,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         contact_pt.head<3>() = all_body_contact_pts.col(j);
         se.contact_pts.push_back(contact_pt);
       }
-      se.contact_surface = (int) pContactSurfaces[i]-1;
       
       active_supports.push_back(se);
       num_active_contact_pts += nc;
@@ -283,7 +277,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     }
   }
 
-  pdata->r->HandC(q,qd,(MatrixXd*)NULL,pdata->H,pdata->C,(MatrixXd*)NULL,(MatrixXd*)NULL,(MatrixXd*)NULL);
+  pdata->r->doKinematicsNew(q, qd);
+  std::map<int, std::unique_ptr<GradientVar<double, TWIST_SIZE, 1>> > f_ext;
+  pdata->H = pdata->r->massMatrix<double>().value();
+  pdata->C = pdata->r->inverseDynamics(f_ext).value();
 
   pdata->H_float = pdata->H.topRows(6);
   pdata->H_act = pdata->H.bottomRows(nu);
@@ -293,9 +290,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
   bool include_angular_momentum = (pdata->W_kdot.array().maxCoeff() > 1e-10);
 
   if (include_angular_momentum) {
-    pdata->r->getCMM(q,qd,pdata->Ag,pdata->Agdot);
-    pdata->Ak = pdata->Ag.topRows(3);
-    pdata->Akdot = pdata->Agdot.topRows(3);
+    pdata->Ag = pdata->r->centroidalMomentumMatrix<double>(0).value();
+    pdata->Agdot_times_v = pdata->r->centroidalMomentumMatrixDotTimesV<double>(0).value();
+    pdata->Ak = pdata->Ag.topRows<3>();
+    pdata->Akdot_times_v = pdata->Agdot_times_v.topRows<3>();
   }
   Vector3d xcom;
   // consider making all J's into row-major
@@ -375,7 +373,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
       pdata->fqp -= y0.transpose()*Qy*D_ls*Jcom;
       pdata->fqp -= (pdata->w_qdd.array()*qddot_des.array()).matrix().transpose();
       if (include_angular_momentum) {
-        pdata->fqp += qd.transpose()*pdata->Akdot.transpose()*pdata->W_kdot*pdata->Ak;
+        pdata->fqp += pdata->Akdot_times_v.transpose() * pdata->W_kdot * pdata->Ak;
         pdata->fqp -= kdot_des.transpose()*pdata->W_kdot*pdata->Ak;
       }
       f.head(nq) = pdata->fqp.transpose();
@@ -650,7 +648,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
       plhs[3] = mxCreateDoubleMatrix(1,active_supports.size(),mxREAL);
       pr = mxGetPrSafe(plhs[3]);
       int i=0;
-      for (vector<SupportStateElement>::iterator iter = active_supports.begin(); iter!=active_supports.end(); iter++) {
+      for (vector<SupportStateElement,Eigen::aligned_allocator<SupportStateElement>>::iterator iter = active_supports.begin(); iter!=active_supports.end(); iter++) {
           pr[i++] = (double) (iter->body_idx + 1);
       }
   }

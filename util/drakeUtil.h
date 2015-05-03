@@ -6,17 +6,10 @@
  */
 
 #include "mex.h"
-#include <string>
 #include <stdexcept>
 #include <vector>
 #include <utility>
 #include <Eigen/Core>
-
-// needed only for valuecheck (but keeping that code in the header avoids explicit instantiations)
-#include <sstream> 
-#include <cmath>
-// end valuecheck includes
-
 
 #ifndef DRAKE_UTIL_H_
 #define DRAKE_UTIL_H_
@@ -82,13 +75,18 @@ Eigen::Matrix<double, RowsAtCompileTime, ColsAtCompileTime> matlabToEigen(const 
   return ret;
 }
 
-mxArray* stdVectorToMatlab(const std::vector<int>& vec) {
+template <typename Scalar>
+mxArray* stdVectorToMatlab(const std::vector<Scalar>& vec) {
   mxArray* pm = mxCreateDoubleMatrix(static_cast<int>(vec.size()), 1, mxREAL);
   for (int i = 0; i < static_cast<int>(vec.size()); i++) {
     mxGetPr(pm)[i] = (double) vec[i];
   }
   return pm;
 }
+
+DLLEXPORT const std::vector<double> matlabToStdVector(const mxArray* in);
+
+DLLEXPORT int sub2ind(mwSize ndims, const mwSize* dims, const mwSize* sub);
 
 void baseZeroToBaseOne(std::vector<int>& vec)
 {
@@ -102,46 +100,13 @@ DLLEXPORT std::pair<Eigen::Vector3d, double> resolveCenterOfPressure(Eigen::Vect
 
 DLLEXPORT double *mxGetPrSafe(const mxArray *pobj);
 
+DLLEXPORT mxArray* mxGetPropertySafe(const mxArray* array, std::string const& field_name);
+DLLEXPORT mxArray* mxGetFieldSafe(const mxArray* array, std::string const& field_name);
+DLLEXPORT mxArray* mxGetPropertySafe(const mxArray* array, size_t index, std::string const& field_name);
+DLLEXPORT mxArray* mxGetFieldSafe(const mxArray* array, size_t index, std::string const& field_name);
+
+DLLEXPORT void mxSetFieldSafe(mxArray* array, size_t index, std::string const & fieldname, mxArray* data);
+
 DLLEXPORT void sizecheck(const mxArray* mat, int M, int N);
-
-template<typename Derived>
-std::string to_string(const Eigen::MatrixBase<Derived> & a)
-{
-	std::stringstream ss;
-	ss << a;
-	return ss.str();
-}
-
-inline int my_isnan(double x) {
-#ifdef WIN32
-  return _isnan(x);
-#else
-  return std::isnan(x);
-#endif
-}
-
-template<typename DerivedA, typename DerivedB>
-void valuecheck(const Eigen::MatrixBase<DerivedA>& a, const Eigen::MatrixBase<DerivedB>& b, double tol, std::string error_msg)
-{
-	// note: isApprox uses the L2 norm, so is bad for comparing against zero
-	if (a.rows() != b.rows() || a.cols() != b.cols()) {
-	  throw std::runtime_error("Drake:ValueCheck ERROR:" + error_msg + "size mismatch: (" + std::to_string(static_cast<unsigned long long>(a.rows())) + " by " + std::to_string(static_cast<unsigned long long>(a.cols())) + ") and (" + std::to_string(static_cast<unsigned long long>(b.rows())) + " by " + std::to_string(static_cast<unsigned long long>(b.cols())) + ")");
-	}
-	if (!(a-b).isZero(tol)) {
-		if (!a.allFinite() && !b.allFinite()) {
-			// could be failing because inf-inf = nan
-			bool ok=true;
-			for (int i=0; i<a.rows(); i++)
-				for (int j=0; j<a.cols(); j++) {
-					ok = ok && ((a(i,j) == std::numeric_limits<double>::infinity() && b(i,j) == std::numeric_limits<double>::infinity()) ||
-					(a(i,j) == -std::numeric_limits<double>::infinity() && b(i,j) == -std::numeric_limits<double>::infinity()) ||
-			    (my_isnan(a(i,j)) && my_isnan(b(i,j))) || (std::abs(a(i,j)-b(i,j))<tol));
-				}
-			if (ok) return;
-		}
-		error_msg += "A:\n" + to_string(a) + "\nB:\n" + to_string(b) + "\n";
-		throw std::runtime_error("Drake:ValueCheck ERROR:" + error_msg);
-	}
-}
 
 #endif /* DRAKE_UTIL_H_ */

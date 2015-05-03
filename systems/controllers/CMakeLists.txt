@@ -1,4 +1,4 @@
-if (eigen3_FOUND)
+if (MATLAB_FOUND)
   include_directories (${CMAKE_SOURCE_DIR}/util )
   pods_find_pkg_config(gurobi)
 
@@ -65,5 +65,4 @@ if (eigen3_FOUND)
   target_link_libraries(individualCentersOfPressuremex drakeRBM drakeUtil drakeControlUtil)
 
 
-endif(eigen3_FOUND)
-
+endif(MATLAB_FOUND)

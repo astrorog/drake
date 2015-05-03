@@ -24,6 +24,8 @@ namespace DrakeCollision
       virtual ElementId addElement(const Element& element);
 
       virtual const Element* readElement(ElementId id);
+      
+      virtual void getTerrainContactPoints(ElementId id0, Eigen::Matrix3Xd &terrain_points);
 
       virtual void updateModel() {};
 
@@ -46,6 +48,11 @@ namespace DrakeCollision
 
       virtual std::vector<PointPair> potentialCollisionPoints(const bool use_margins) 
       { return std::vector<PointPair>(); };
+
+      virtual std::vector<size_t> collidingPoints(
+          const std::vector<Eigen::Vector3d>& points, 
+          double collision_threshold)
+      { return std::vector<size_t>(); };
 
       //
       // Performs raycasting collision detecting (like a LIDAR / laser rangefinder)
